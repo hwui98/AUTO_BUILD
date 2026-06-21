@@ -1,4 +1,5 @@
 name: Build SM8250 MI Kernel
+
 on:
   workflow_dispatch:
     inputs:
@@ -13,23 +14,28 @@ on:
           - MI10_Ultra
           - REDMI_K30_Pro
           - REDMI_K30s_Ultra
+
       susfs:
         description: '是否集成SUSFS'
         required: true
         default: true
         type: boolean
+
       version:
         description: '自定义版本名（如perf-xxx）/可为空（则为n0kernel）'
         required: false
         type: string
+
 jobs:
   build_job:
     runs-on: ubuntu-22.04
+
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
       CI: "false"
+
     steps:
 
       - name: Maximize build space
@@ -45,130 +51,133 @@ jobs:
 
       - name: 1.下载编译工具
         run: |
-         mkdir -p $GITHUB_WORKSPACE/
-         kernel_workspace        
-         cd $GITHUB_WORKSPACE/kernel_workspace
-         git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+          mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+          cd $GITHUB_WORKSPACE/kernel_workspace
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
       - name: 2.克隆源码与补丁
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
-          git clone https://github.com/jhchong94/kernel_xiaomi_sm8250_n0kernel --depth=1 android_kernel
+          git clone --depth=1 https://github.com/jhchong94/kernel_xiaomi_sm8250_n0kernel android_kernel
           git clone https://github.com/zzh20188/AUTO_BUILD.git src
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-4.19 --depth=1 susfs
+          git clone --depth=1 -b kernel-4.19 https://gitlab.com/simonpunk/susfs4ksu.git susfs
 
       - name: 3.安装KSUN
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next-susfs
-          
+
       - name: 4.集成KSU
         run: |
           ls
           echo "进入源码目录"
           cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel
           cp $GITHUB_WORKSPACE/kernel_workspace/src/patches/* .
-          # patch -p1 < new_defconfig.patch
           patch -p1 < non-kprobes.patch
-          # tail -n 10 arch/arm64/configs/vendor/umi_defconfig
 
       - name: 5.应用susfs补丁
         run: |
           if [ ${{ inputs.susfs }} = true ]; then
             echo "选择集成susfs"
             cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel
-            echo "复制susfs/kernel_patches/fs/* 的内容"
+
             cp $GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches/fs/* ./fs/
-            echo "复制susfs/kernel_patches/include/linux/* 的内容"
             cp $GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches/include/linux/* ./include/linux/
-            echo "复制susfs内核源码补丁"
+
             cp $GITHUB_WORKSPACE/kernel_workspace/susfs/kernel_patches/50_add_susfs_in_kernel-4.19.patch .
-            echo "执行susfs补丁"
+
             patch -p1 < 50_add_susfs_in_kernel-4.19.patch || true
-            echo "修复"
-            patch -p1 < after_patch_fix.patch            
+            patch -p1 < after_patch_fix.patch
+
           else
             echo "跳过集成susfs"
           fi
-        
+
       - name: 6.开始构建
         run: |
           export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/bin:$PATH
+
           echo "Updated PATH: $PATH"
           clang --version
-          
+
           cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel
-          # 自定义版本
-          if [ ! -z ${{ inputs.version }} ]; then
-            echo "不为空"
+
+          if [ ! -z "${{ inputs.version }}" ]; then
             sed -i 's/ -dirty//g' ./scripts/setlocalversion
             sed -i '$s|echo "\$res"|echo "-${{ inputs.version }}"|' ./scripts/setlocalversion
-          else
-            echo "字符串为空"
           fi
 
           case "${{ inputs.phone }}" in
-              "MI10")
-                  echo "选择小米10配置"
-                  DEFCONFIG=vendor/umi_defconfig
-                  ;;
-              "MI10_Pro")
-                  echo "选择小米10pro配置"
-                  DEFCONFIG=vendor/cmi_defconfig
-                  ;;
-              "REDMI_K30_Pro")
-                  echo "选择红米k30pro配置"
-                  DEFCONFIG=vendor/lmi_defconfig
-                  ;;
-              "REDMI_K30s_Ultra")
-                  echo "选择红米k30sUltra配置"
-                  DEFCONFIG=vendor/apollo_defconfig
-                  ;;
-              "MI10_Ultra")
-                  echo "选择小米10Ultra配置"
-                  DEFCONFIG=vendor/cas_defconfig
-                  ;;
-              *)
-                  echo "非法内容"
-                  ;;
+            "MI10")
+              DEFCONFIG=vendor/umi_defconfig
+              ;;
+            "MI10_Pro")
+              DEFCONFIG=vendor/cmi_defconfig
+              ;;
+            "REDMI_K30_Pro")
+              DEFCONFIG=vendor/lmi_defconfig
+              ;;
+            "REDMI_K30s_Ultra")
+              DEFCONFIG=vendor/apollo_defconfig
+              ;;
+            "MI10_Ultra")
+              DEFCONFIG=vendor/cas_defconfig
+              ;;
           esac
 
-          echo "当前配置为 $DEFCONFIG"
-          echo '修改defconfig'
-          echo "CONFIG_MODULES=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KPROBES=n" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./arch/arm64/configs/$DEFCONFIG
-          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_MODULES=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KPROBES=n" >> arch/arm64/configs/$DEFCONFIG
 
-          sed -i '2s/check_defconfig//' ./build.config.gki
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> arch/arm64/configs/$DEFCONFIG
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> arch/arm64/configs/$DEFCONFIG
 
-          make -j$(nproc --all) CC=clang O=out ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-buildroot-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-androideabi- $DEFCONFIG
-          make -j$(nproc --all) CC=clang O=out ARCH=arm64 CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-android- CROSS_COMPILE_ARM32=arm-linux-androideabi-    
-      
+          sed -i '2s/check_defconfig//' build.config.gki
+
+          make -j$(nproc --all) \
+            CC=clang \
+            O=out \
+            ARCH=arm64 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-buildroot-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            $DEFCONFIG
+
+          make -j$(nproc --all) \
+            CC=clang \
+            O=out \
+            ARCH=arm64 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi-
+
       - name: 7.查看成果
         run: |
-            cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel/out/arch/arm64/boot
-            ls
-            strings Image | grep "Linux version"
-            cp Image $GITHUB_WORKSPACE/kernel_workspace/src/Anykernel/
+          cd $GITHUB_WORKSPACE/kernel_workspace/android_kernel/out/arch/arm64/boot
+          ls
+          strings Image | grep "Linux version"
+          cp Image $GITHUB_WORKSPACE/kernel_workspace/src/Anykernel/
 
       - name: 8.上传刷入包
         uses: actions/upload-artifact@v4
         with:
-          name: KernelSU_NEXT_SUSFS_${{ github.event.inputs.phone}}
+          name: KernelSU_NEXT_SUSFS_${{ github.event.inputs.phone }}
           path: kernel_workspace/src/Anykernel/*
           retention-days: 3
