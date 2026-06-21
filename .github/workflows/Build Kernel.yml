@@ -45,11 +45,14 @@ jobs:
 
       - name: 1.下载编译工具
         run: |
-          mkdir -p $GITHUB_WORKSPACE/kernel_workspace
-          cd $GITHUB_WORKSPACE/kernel_workspace
-          wget -q https://github.com/ZyCromerZ/Clang/releases/download/17.0.0git-20230801-release/Clang-17.0.0git-20230801.tar.gzmkdir -p clang
-          tar -xzf Clang-17.0.0git-20230801.tar.gz -C clan
-          
+         mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+         cd $GITHUB_WORKSPACE/kernel_workspace
+
+         wget https://github.com/ZyCromerZ/Clang/releases/download/17.0.0git-20230801-release/Clang-17.0.0git-20230801.tar.gz
+         
+         mkdir -p clang
+
+         tar -xzf Clang-17.0.0git-20230801.tar.gz -C clang
       - name: 2.克隆源码与补丁
         run: |
           cd $GITHUB_WORKSPACE/kernel_workspace
